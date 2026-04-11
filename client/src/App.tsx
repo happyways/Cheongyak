@@ -56,6 +56,7 @@ interface HouseDetail {
 }
 
 type ViewMode = 'list' | 'map';
+type SortBy = 'upcoming' | 'latest';
 
 const getApartmentKey = (item: CheongyakItem) => {
   const hNo = item.HOUSE_MANAGE_NO || item.houseManageNo;
@@ -85,10 +86,12 @@ const MAP_REGIONS = [
 
 function App() {
   const [items, setItems] = useState<CheongyakItem[]>([]);
+  const [rawData, setRawData] = useState<CheongyakItem[]>([]);
   const [details, setDetails] = useState<Record<string, HouseDetail[]>>({});
   const [dataErrors, setDataErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<ViewMode>('list');
+  const [sortBy, setSortBy] = useState<SortBy>('upcoming');
   const [selectedRegion, setSelectedRegion] = useState<string | null>(null);
   const [hoveredRegion, setHoveredRegion] = useState<string | null>(null);
   const [expandedCards, setExpandedCards] = useState<Record<string, boolean>>({});
@@ -165,27 +168,39 @@ function App() {
     setLoading(true);
     try {
       const response = await axios.get(`http://${window.location.hostname}:5001/api/apartments`);
-      const rawData = (response.data.data || []) as CheongyakItem[];
+      const data = (response.data.data || []) as CheongyakItem[];
       const todayTime = new Date().setHours(0, 0, 0, 0);
 
-      const filteredData = rawData.filter(item => {
+      const filtered = data.filter(item => {
         const endDates = [item.RCEPT_ENDDE, item.SUBSCRPT_RCEPT_ENDDE, item.GNRL_RCEPT_ENDDE, item.SPECL_RCEPT_ENDDE, item.GNRL_RNK2_ETC_AREA_ENDDE, item.GNRL_RNK2_CRSPAREA_ENDDE].map(d => parseToTime(d)).filter(t => t !== null);
         if (endDates.length === 0) return true;
         return Math.max(...(endDates as number[])) >= todayTime;
       });
 
-      const sortedData = [...filteredData].sort((a, b) => {
+      setRawData(filtered);
+      filtered.forEach(item => fetchDetails(item));
+    } catch (e) { console.error(e); } finally { setLoading(false); }
+  };
+
+  useEffect(() => {
+    if (rawData.length === 0) return;
+    const todayTime = new Date().setHours(0, 0, 0, 0);
+    
+    const sorted = [...rawData].sort((a, b) => {
+      if (sortBy === 'latest') {
+        const timeA = parseToTime(a.RCRIT_PBLANC_DE) || 0;
+        const timeB = parseToTime(b.RCRIT_PBLANC_DE) || 0;
+        return timeB - timeA; // 공고일 최신순
+      } else {
         const getStart = (x: CheongyakItem) => parseToTime(x.SPSPLY_RCEPT_BGNDE || x.SPECL_RCEPT_BGNDE || x.GNRL_RNK1_CRSPAREA_RCPTDE || x.SUBSCRPT_RCEPT_BGNDE || x.GNRL_RCEPT_BGNDE || x.RCEPT_BGNDE) || 0;
         const startA = getStart(a), startB = getStart(b);
         if (startA >= todayTime && startB < todayTime) return -1;
         if (startA < todayTime && startB >= todayTime) return 1;
         return startA - startB;
-      });
-
-      setItems(sortedData);
-      sortedData.forEach(item => fetchDetails(item));
-    } catch (e) { console.error(e); } finally { setLoading(false); }
-  };
+      }
+    });
+    setItems(sorted);
+  }, [rawData, sortBy]);
 
   useEffect(() => { fetchItems(); }, []);
 
@@ -284,9 +299,15 @@ function App() {
     <div className="container">
       <header className="main-header">
         <div className="header-content"><h1>🏢 청약 대시보드</h1><p>실시간 분양가 및 지역별 현황</p></div>
-        <div className="view-toggle">
-          <button className={`toggle-btn ${viewMode === 'list' ? 'active' : ''}`} onClick={() => setViewMode('list')}>목록</button>
-          <button className={`toggle-btn ${viewMode === 'map' ? 'active' : ''}`} onClick={() => setViewMode('map')}>지도</button>
+        <div className="header-controls">
+          <div className="sort-toggle">
+            <button className={`toggle-btn small ${sortBy === 'upcoming' ? 'active' : ''}`} onClick={() => setSortBy('upcoming')}>접수예정순</button>
+            <button className={`toggle-btn small ${sortBy === 'latest' ? 'active' : ''}`} onClick={() => setSortBy('latest')}>최신공고순</button>
+          </div>
+          <div className="view-toggle">
+            <button className={`toggle-btn ${viewMode === 'list' ? 'active' : ''}`} onClick={() => setViewMode('list')}>목록</button>
+            <button className={`toggle-btn ${viewMode === 'map' ? 'active' : ''}`} onClick={() => setViewMode('map')}>지도</button>
+          </div>
         </div>
       </header>
       <main>
