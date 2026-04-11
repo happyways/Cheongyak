@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
-import { Calendar, MapPin, Building2, Info, Loader2, ExternalLink, LayoutGrid, Map as MapIcon, ChevronLeft, Bell, Wallet, ChevronDown, ChevronUp, Users, Baby, AlertCircle } from 'lucide-react';
+import { Calendar, MapPin, Building2, Info, Loader2, ExternalLink, LayoutGrid, Map as MapIcon, ChevronLeft, Bell, Wallet, ChevronDown, ChevronUp, Users, Baby, AlertCircle, Search, X } from 'lucide-react';
 import './App.css';
 
 interface CheongyakItem {
@@ -92,6 +92,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [sortBy, setSortBy] = useState<SortBy>('upcoming');
+  const [searchTerm, setSearchTerm] = useState('');
   const [selectedRegion, setSelectedRegion] = useState<string | null>(null);
   const [hoveredRegion, setHoveredRegion] = useState<string | null>(null);
   const [expandedCards, setExpandedCards] = useState<Record<string, boolean>>({});
@@ -211,7 +212,16 @@ function App() {
     return counts;
   }, [items]);
 
-  const filteredItems = useMemo(() => selectedRegion ? items.filter(item => item.SUBSCRPT_AREA_CODE_NM === selectedRegion) : [], [items, selectedRegion]);
+  const filteredItems = useMemo(() => {
+    let result = items;
+    if (selectedRegion) {
+      result = result.filter(item => item.SUBSCRPT_AREA_CODE_NM === selectedRegion);
+    }
+    if (searchTerm) {
+      result = result.filter(item => item.HOUSE_NM.toLowerCase().includes(searchTerm.toLowerCase()));
+    }
+    return result;
+  }, [items, selectedRegion, searchTerm]);
 
   const renderPriceTable = (item: CheongyakItem) => {
     const key = getApartmentKey(item);
@@ -315,6 +325,20 @@ function App() {
       <header className="main-header">
         <div className="header-content"><h1>🏢 청약 대시보드</h1><p>실시간 분양가 및 지역별 현황</p></div>
         <div className="header-controls">
+          <div className="search-bar">
+            <Search size={18} className="search-icon" />
+            <input 
+              type="text" 
+              placeholder="단지명 검색..." 
+              value={searchTerm} 
+              onChange={(e) => setSearchTerm(e.target.value)} 
+            />
+            {searchTerm && (
+              <button className="search-clear-btn" onClick={() => setSearchTerm('')} title="검색어 지우기">
+                <X size={14} />
+              </button>
+            )}
+          </div>
           <div className="sort-toggle">
             <button className={`toggle-btn small ${sortBy === 'upcoming' ? 'active' : ''}`} onClick={() => setSortBy('upcoming')}>접수예정순</button>
             <button className={`toggle-btn small ${sortBy === 'latest' ? 'active' : ''}`} onClick={() => setSortBy('latest')}>최신공고순</button>
@@ -347,8 +371,21 @@ function App() {
           </div>
         ) : (
           <div className="list-view-container">
-            {selectedRegion && <button className="back-link" onClick={() => setSelectedRegion(null)}><ChevronLeft size={20} /> 지도로 돌아가기 ({selectedRegion})</button>}
-            <div className="grid">{(selectedRegion ? filteredItems : items).map((item, idx) => renderCard(item, idx))}</div>
+            {(selectedRegion || searchTerm) && (
+              <div className="list-header-actions">
+                {selectedRegion && <button className="back-link" onClick={() => setSelectedRegion(null)}><ChevronLeft size={20} /> 지도로 돌아가기 ({selectedRegion})</button>}
+                {searchTerm && <button className="clear-search" onClick={() => setSearchTerm('')}>검색 초기화</button>}
+              </div>
+            )}
+            <div className="grid">
+              {filteredItems.map((item, idx) => renderCard(item, idx))}
+            </div>
+            {filteredItems.length === 0 && (
+              <div className="empty-state">
+                <Info size={48} />
+                <p>검색 결과가 없습니다.</p>
+              </div>
+            )}
           </div>
         )}
       </main>
