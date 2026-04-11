@@ -130,22 +130,23 @@ function App() {
     return d;
   };
 
-  const getDDayBadge = (targetDate: string | null, allEndDates: (string|null)[]) => {
+  const getDDayBadge = (target: string | number | null, allEndDates: (string|null)[]) => {
     const todayTime = new Date().setHours(0,0,0,0);
-
-    // 1. 현재 진행 중인지 확인 (종료일들 중 오늘 이후가 있는지)
+    
+    // 타겟이 타임스탬프(숫자)인 경우와 문자열인 경우 모두 처리
+    const startTime = typeof target === 'number' ? target : parseToTime(target);
+    
+    // 현재 진행 중인지 확인
     const endTimes = allEndDates.map(d => parseToTime(d)).filter((t): t is number => t !== null);
     const maxEndTime = endTimes.length > 0 ? Math.max(...endTimes) : 0;
-
-    const startTime = parseToTime(targetDate);
-
+    
     if (startTime && startTime > todayTime) {
       const days = Math.ceil((startTime - todayTime) / (1000 * 60 * 60 * 24));
       return <span className="d-day future">D-{days}</span>;
     } else if (startTime && startTime === todayTime) {
       return <span className="d-day today">오늘 시작</span>;
     } else if (maxEndTime >= todayTime) {
-      return <span className="d-day future" style={{background: '#dbeafe', color: '#2563eb'}}>진행중</span>;
+      return <span className="d-day future" style={{background: '#eff6ff', color: '#2563eb', border: '1px solid #bfdbfe'}}>진행중</span>;
     }
     return <span className="d-day past">접수종료</span>;
   };
@@ -218,7 +219,7 @@ function App() {
     if (dataErrors[key]) return <div className="error-box"><AlertCircle size={16} /><span>{dataErrors[key]}</span></div>;
     const modelDetails = details[key];
     if (!modelDetails) return <div className="loading-small">데이터 수신 중...</div>;
-    const isExpanded = expandedCards[key] || false;
+    const isExpanded = expandedCards[key] !== undefined ? expandedCards[key] : true; // 기본값을 true로 설정
     const displayList = isExpanded ? modelDetails : modelDetails.slice(0, 3);
 
     return (
@@ -250,9 +251,16 @@ function App() {
   const renderCard = (item: CheongyakItem, idx: number) => {
     const allDates = [item.SPSPLY_RCEPT_BGNDE, item.GNRL_RNK1_CRSPAREA_RCPTDE, item.GNRL_RNK1_GG_RCPTDE, item.GNRL_RNK1_ETC_AREA_RCPTDE, item.GNRL_RNK2_CRSPAREA_RCPTDE, item.GNRL_RNK2_GG_RCPTDE, item.GNRL_RNK2_ETC_AREA_RCPTDE, item.SUBSCRPT_RCEPT_BGNDE, item.SPECL_RCEPT_BGNDE, item.GNRL_RCEPT_BGNDE, item.RCEPT_BGNDE].filter(d => d && d !== 'null' && d !== '');
     const todayTime = new Date().setHours(0,0,0,0);
-    const upcoming = allDates.map(d => parseToTime(d)).filter((t): t is number => t !== null && t >= todayTime).sort((a,b) => a-b);
-    const priorityDateStr = upcoming.length > 0 ? String(upcoming[0]) : (allDates[0] || item.RCEPT_BGNDE);
-
+    
+    // 미래/오늘 일정 중 가장 빠른 타임스탬프 찾기
+    const upcomingTimes = allDates
+      .map(d => parseToTime(d))
+      .filter((t): t is number => t !== null && t >= todayTime)
+      .sort((a,b) => a - b);
+    
+    // 미래 일정이 있으면 그 타임스탬프를, 없으면 전체 일정 중 첫 번째 값을 전달
+    const priorityDate = upcomingTimes.length > 0 ? upcomingTimes[0] : (allDates[0] || item.RCEPT_BGNDE);
+    
     const endDates = [item.RCEPT_ENDDE, item.SUBSCRPT_RCEPT_ENDDE, item.GNRL_RCEPT_ENDDE, item.SPECL_RCEPT_ENDDE, item.GNRL_RNK2_ETC_AREA_ENDDE, item.GNRL_RNK2_CRSPAREA_ENDDE];
 
     const getCatBadge = (cat?: string) => {
@@ -266,7 +274,7 @@ function App() {
     return (
       <div key={idx} className="card">
         <div className="card-header">
-          <div className="badge-group">{getCatBadge(item._category)}<span className="badge secondary">{item.RENT_SECD_NM}</span>{getDDayBadge(priorityDateStr, endDates)}</div>
+          <div className="badge-group">{getCatBadge(item._category)}<span className="badge secondary">{item.RENT_SECD_NM}</span>{getDDayBadge(priorityDate, endDates)}</div>
           <h3>{item.HOUSE_NM}</h3>
           <p className="constructor">시공: {item.CNSTRCT_ENTRPS_NM || '정보없음'}</p>
         </div>
@@ -277,6 +285,13 @@ function App() {
             <div className="info-item"><Building2 size={16} /><span>총 {item.TOT_SUPLY_HSHLDCO}세대 / 입주: {item.MVN_PREARNGE_YM}</span></div>
           </div>
           <div className="date-section">
+            {item.RCRIT_PBLANC_DE && (
+              <div className="info-item small">
+                <Info size={14} className="text-gray" />
+                <span className="date-label">모집공고일:</span>
+                <span>{fmtDate(item.RCRIT_PBLANC_DE)}</span>
+              </div>
+            )}
             {item.SPSPLY_RCEPT_BGNDE && <div className="info-item small"><Calendar size={14} className="text-orange" /><span className="date-label">특별공급:</span><span>{fmtDate(item.SPSPLY_RCEPT_BGNDE)}</span></div>}
             {item.GNRL_RNK1_CRSPAREA_RCPTDE && <div className="info-item small"><Calendar size={14} className="text-blue" /><span className="date-label">1순위(해당):</span><span>{fmtDate(item.GNRL_RNK1_CRSPAREA_RCPTDE)}</span></div>}
             {item.GNRL_RNK1_GG_RCPTDE && <div className="info-item small"><Calendar size={14} className="text-blue" /><span className="date-label">1순위(경기):</span><span>{fmtDate(item.GNRL_RNK1_GG_RCPTDE)}</span></div>}
