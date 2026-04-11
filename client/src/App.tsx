@@ -103,8 +103,7 @@ function App() {
         params: { category: item._category || 'APT' }
       });
       const resData = res.data.data || [];
-      
-      // 데이터 검증: 요청한 번호와 응답 데이터의 번호가 다르면 에러 표시
+
       if (resData.length > 0 && resData[0].HOUSE_MANAGE_NO !== hNo) {
         setDataErrors(prev => ({ ...prev, [key]: '정부 API 서버 데이터 불일치 오류' }));
       } else {
@@ -113,86 +112,79 @@ function App() {
     } catch (e) {}
   };
 
+  // --- 유틸리티 함수 ---
+  const parseToTime = (d: string | null) => {
+    if (!d || d === 'null' || d === '') return null;
+    let f = d;
+    if (d.length === 8 && !d.includes('-')) f = `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`;
+    const t = new Date(f).getTime();
+    return isNaN(t) ? null : t;
+  };
+
+  const fmtDate = (d: string | null) => {
+    if (!d || d === 'null' || d === '') return '';
+    if (d.length === 8 && !d.includes('-')) return `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`;
+    return d;
+  };
+
+  const getDDayBadge = (targetDate: string | null, allEndDates: (string|null)[]) => {
+    const todayTime = new Date().setHours(0,0,0,0);
+
+    // 1. 현재 진행 중인지 확인 (종료일들 중 오늘 이후가 있는지)
+    const endTimes = allEndDates.map(d => parseToTime(d)).filter((t): t is number => t !== null);
+    const maxEndTime = endTimes.length > 0 ? Math.max(...endTimes) : 0;
+
+    const startTime = parseToTime(targetDate);
+
+    if (startTime && startTime > todayTime) {
+      const days = Math.ceil((startTime - todayTime) / (1000 * 60 * 60 * 24));
+      return <span className="d-day future">D-{days}</span>;
+    } else if (startTime && startTime === todayTime) {
+      return <span className="d-day today">오늘 시작</span>;
+    } else if (maxEndTime >= todayTime) {
+      return <span className="d-day future" style={{background: '#dbeafe', color: '#2563eb'}}>진행중</span>;
+    }
+    return <span className="d-day past">접수종료</span>;
+  };
+
+  const formatPrice = (priceStr: string) => {
+    if (!priceStr) return '정보없음';
+    let price = parseInt(priceStr.replace(/,/g, ''));
+    if (isNaN(price)) return '정보없음';
+    if (price < 10000000) {
+      const uk = Math.floor(price / 10000);
+      const man = price % 10000;
+      return `${uk > 0 ? uk + '억 ' : ''}${man > 0 ? man.toLocaleString() + '만' : ''}원`;
+    }
+    const uk = Math.floor(price / 100000000);
+    const man = Math.floor((price % 100000000) / 10000);
+    return `${uk > 0 ? uk + '억 ' : ''}${man > 0 ? man.toLocaleString() + '만' : ''}원`;
+  };
+
   const fetchItems = async () => {
     setLoading(true);
     try {
       const response = await axios.get(`http://${window.location.hostname}:5001/api/apartments`);
       const rawData = (response.data.data || []) as CheongyakItem[];
-      
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const todayTime = today.getTime();
+      const todayTime = new Date().setHours(0, 0, 0, 0);
 
-      // 날짜 파싱 헬퍼 함수
-      const parseDate = (d: string | null) => {
-        if (!d || d === 'null' || d === '') return null;
-        let formatted = d;
-        if (d.length === 8 && !d.includes('-')) {
-          formatted = `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`;
-        }
-        const time = new Date(formatted).getTime();
-        return isNaN(time) ? null : time;
-      };
-
-      // 접수 종료된 공고 필터링 (가장 늦은 종료일 기준)
       const filteredData = rawData.filter(item => {
-        const endDates = [
-          item.RCEPT_ENDDE,
-          item.SUBSCRPT_RCEPT_ENDDE,
-          item.GNRL_RCEPT_ENDDE,
-          item.SPECL_RCEPT_ENDDE,
-          item.GNRL_RNK2_ETC_AREA_ENDDE,
-          item.GNRL_RNK2_CRSPAREA_ENDDE
-        ].map(d => parseDate(d)).filter(t => t !== null);
-
-        if (endDates.length === 0) return true; // 종료일 정보 없으면 유지
-
-        const maxEndTime = Math.max(...(endDates as number[]));
-        return maxEndTime >= todayTime; // 오늘 포함 이후만 노출
+        const endDates = [item.RCEPT_ENDDE, item.SUBSCRPT_RCEPT_ENDDE, item.GNRL_RCEPT_ENDDE, item.SPECL_RCEPT_ENDDE, item.GNRL_RNK2_ETC_AREA_ENDDE, item.GNRL_RNK2_CRSPAREA_ENDDE].map(d => parseToTime(d)).filter(t => t !== null);
+        if (endDates.length === 0) return true;
+        return Math.max(...(endDates as number[])) >= todayTime;
       });
 
       const sortedData = [...filteredData].sort((a, b) => {
-        // 우선순위 날짜 결정 (특별공급 -> 1순위 -> 2순위 -> 오피스텔 -> 임대)
-        const dateAStr = a.SPSPLY_RCEPT_BGNDE || 
-                         a.SPECL_RCEPT_BGNDE ||
-                         a.GNRL_RNK1_CRSPAREA_RCPTDE || 
-                         a.GNRL_RNK1_GG_RCPTDE || 
-                         a.GNRL_RNK1_ETC_AREA_RCPTDE || 
-                         a.SUBSCRPT_RCEPT_BGNDE ||
-                         a.GNRL_RCEPT_BGNDE ||
-                         a.RCEPT_BGNDE;
-        const dateBStr = b.SPSPLY_RCEPT_BGNDE || 
-                         b.SPECL_RCEPT_BGNDE ||
-                         b.GNRL_RNK1_CRSPAREA_RCPTDE || 
-                         b.GNRL_RNK1_GG_RCPTDE || 
-                         b.GNRL_RNK1_ETC_AREA_RCPTDE || 
-                         b.SUBSCRPT_RCEPT_BGNDE || 
-                         b.GNRL_RCEPT_BGNDE ||
-                         b.RCEPT_BGNDE;
-
-        const dateA = parseDate(dateAStr) || 0;
-        const dateB = parseDate(dateBStr) || 0;
-        const diffA = dateA - todayTime;
-        const diffB = dateB - todayTime;
-
-        // 1. 미래 일정이 과거 일정보다 무조건 앞으로
-        if (diffA >= 0 && diffB < 0) return -1;
-        if (diffA < 0 && diffB >= 0) return 1;
-
-        // 2. 둘 다 미래면 오늘과 가까운 순 (오름차순)
-        if (diffA >= 0 && diffB >= 0) return diffA - diffB;
-
-        // 3. 둘 다 과거면 최근 종료된 순 (내림차순)
-        return diffB - diffA;
+        const getStart = (x: CheongyakItem) => parseToTime(x.SPSPLY_RCEPT_BGNDE || x.SPECL_RCEPT_BGNDE || x.GNRL_RNK1_CRSPAREA_RCPTDE || x.SUBSCRPT_RCEPT_BGNDE || x.GNRL_RCEPT_BGNDE || x.RCEPT_BGNDE) || 0;
+        const startA = getStart(a), startB = getStart(b);
+        if (startA >= todayTime && startB < todayTime) return -1;
+        if (startA < todayTime && startB >= todayTime) return 1;
+        return startA - startB;
       });
 
       setItems(sortedData);
-      sortedData.forEach((item: CheongyakItem) => fetchDetails(item));
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setLoading(false);
-    }
+      sortedData.forEach(item => fetchDetails(item));
+    } catch (e) { console.error(e); } finally { setLoading(false); }
   };
 
   useEffect(() => { fetchItems(); }, []);
@@ -203,304 +195,87 @@ function App() {
     return counts;
   }, [items]);
 
-  const filteredItems = useMemo(() => {
-    if (!selectedRegion) return [];
-    return items.filter(item => item.SUBSCRPT_AREA_CODE_NM === selectedRegion);
-  }, [items, selectedRegion]);
-
-  const toggleExpand = (key: string) => {
-    setExpandedCards(prev => ({ ...prev, [key]: !prev[key] }));
-  };
-
-  const formatPrice = (priceStr: string) => {
-    let price = parseInt(priceStr.replace(/,/g, ''));
-    if (isNaN(price)) return '정보없음';
-    if (price < 10000000) {
-      const uk = Math.floor(price / 10000);
-      const man = price % 10000;
-      if (uk > 0) return `${uk}억 ${man > 0 ? man.toLocaleString() + '만' : ''}`;
-      return `${man.toLocaleString()}만원`;
-    }
-    const uk = Math.floor(price / 100000000);
-    const man = Math.floor((price % 100000000) / 10000);
-    if (uk > 0) return `${uk}억 ${man > 0 ? man.toLocaleString() + '만' : ''}`;
-    return `${man.toLocaleString()}만원`;
-  };
-
-  const getDDay = (dateStr: string | null) => {
-    if (!dateStr || dateStr === 'null' || dateStr === '') return null;
-    
-    // YYYYMMDD -> YYYY-MM-DD
-    let formattedDate = dateStr;
-    if (dateStr.length === 8 && !dateStr.includes('-')) {
-      formattedDate = `${dateStr.slice(0, 4)}-${dateStr.slice(4, 6)}-${dateStr.slice(6, 8)}`;
-    }
-
-    const time = new Date(formattedDate).getTime();
-    if (isNaN(time)) return null;
-
-    const days = Math.ceil((time - new Date().setHours(0,0,0,0)) / (1000 * 60 * 60 * 24));
-    if (days === 0) return <span className="d-day today">오늘 시작</span>;
-    if (days > 0) return <span className="d-day future">D-{days}</span>;
-    return <span className="d-day past">접수종료</span>;
-  };
+  const filteredItems = useMemo(() => selectedRegion ? items.filter(item => item.SUBSCRPT_AREA_CODE_NM === selectedRegion) : [], [items, selectedRegion]);
 
   const renderPriceTable = (item: CheongyakItem) => {
     const key = getApartmentKey(item);
     if (!key) return null;
-    
-    if (dataErrors[key]) {
-      return (
-        <div className="error-box">
-          <AlertCircle size={16} />
-          <span>{dataErrors[key]} (상세정보 제공 일시중단)</span>
-        </div>
-      );
-    }
-
+    if (dataErrors[key]) return <div className="error-box"><AlertCircle size={16} /><span>{dataErrors[key]}</span></div>;
     const modelDetails = details[key];
-    const isExpanded = expandedCards[key];
-
     if (!modelDetails) return <div className="loading-small">데이터 수신 중...</div>;
-    if (modelDetails.length === 0) return <div className="loading-small">주택형 정보가 없습니다.</div>;
-
-    const displayList = isExpanded === false ? modelDetails.slice(0, 3) : modelDetails;
+    const isExpanded = expandedCards[key] || false;
+    const displayList = isExpanded ? modelDetails : modelDetails.slice(0, 3);
 
     return (
       <div className="price-table-container">
-        <div className="price-table-header">
-          <span>주택형</span>
-          <span>공급금액</span>
-          <span>신혼/신생아</span>
-        </div>
-        {displayList.map((d: any, i) => {
-          const area = parseFloat(d.SUPLY_AR);
-          const pyeong = area / 3.3058;
+        <div className="price-table-header"><span>주택형</span><span>공급금액</span><span>신혼/신생아</span></div>
+        {displayList.map((d: any, i: number) => {
+          const area = parseFloat(d.SUPLY_AR), pyeong = area / 3.3058;
           const houseType = d.HOUSE_TY || d.TP || '정보없음';
           const amountStr = d.LTTOT_TOP_AMOUNT || d.SUPLY_AMOUNT || '0';
           const rawPrice = parseInt(amountStr.replace(/,/g, ''));
-          
-          let pyeongPrice;
-          if (rawPrice < 10000000) {
-            pyeongPrice = Math.round(rawPrice / pyeong);
-          } else {
-            pyeongPrice = Math.round((rawPrice / pyeong) / 10000);
-          }
+          const pyeongPrice = rawPrice < 10000000 ? Math.round(rawPrice / pyeong) : Math.round((rawPrice / pyeong) / 10000);
 
           return (
             <div key={i} className="price-table-row">
-              <div className="type-col">
-                <span className="type-name">{houseType}</span>
-                <span className="py-price">{pyeongPrice.toLocaleString()}만/평</span>
-              </div>
+              <div className="type-col"><span className="type-name">{houseType}</span><span className="py-price">{pyeongPrice.toLocaleString()}만/평</span></div>
               <span className="amount-col">{formatPrice(amountStr)}</span>
               <div className="supply-col">
-                <div className="supply-badge newlyweds" title="신혼부부">
-                  <Users size={10} /> {d.NWWDS_HSHLDCO || d.SPSPLY_NEW_MRRG_HSHLDCO || 0}
-                </div>
-                <div className="supply-badge newborn" title="신생아">
-                  <Baby size={10} /> {d.NWBB_HSHLDCO || 0}
-                </div>
+                <div className="supply-badge newlyweds" title="신혼부부"><Users size={10} /> {d.NWWDS_HSHLDCO || d.SPSPLY_NEW_MRRG_HSHLDCO || 0}</div>
+                <div className="supply-badge newborn" title="신생아"><Baby size={10} /> {d.NWBB_HSHLDCO || 0}</div>
               </div>
             </div>
           );
         })}
-        {modelDetails.length > 3 && (
-          <button className="expand-btn" onClick={(e) => { e.preventDefault(); toggleExpand(key); }}>
-            {isExpanded === false ? <><ChevronDown size={14} /> 전체 {modelDetails.length}개 타입 보기</> : <><ChevronUp size={14} /> 접기</>}
-          </button>
-        )}
+        {modelDetails.length > 3 && <button className="expand-btn" onClick={() => setExpandedCards(p => ({...p, [key]: !p[key]}))}>{!isExpanded ? <><ChevronDown size={14} /> 전체 {modelDetails.length}개 타입 보기</> : <><ChevronUp size={14} /> 접기</>}</button>}
       </div>
     );
   };
 
   const renderCard = (item: CheongyakItem, idx: number) => {
-    // 유효한 모든 접수일 수집 (민간임대/무순위 포함 + 수정된 필드명)
-    const allDates = [
-      item.SPSPLY_RCEPT_BGNDE,
-      item.GNRL_RNK1_CRSPAREA_RCPTDE,
-      item.GNRL_RNK1_GG_RCPTDE,
-      item.GNRL_RNK1_ETC_AREA_RCPTDE,
-      item.GNRL_RNK2_CRSPAREA_RCPTDE,
-      item.GNRL_RNK2_GG_RCPTDE,
-      item.GNRL_RNK2_ETC_AREA_RCPTDE,
-      item.SUBSCRPT_RCEPT_BGNDE,
-      item.SPECL_RCEPT_BGNDE,
-      item.GNRL_RCEPT_BGNDE,
-      item.RCEPT_BGNDE
-    ].filter(d => d && d !== 'null' && d !== '');
-
-    // 날짜 파싱 헬퍼 (로컬)
-    const parseLocalDate = (d: string | null) => {
-      if (!d || d === 'null' || d === '') return 0;
-      let formatted = d;
-      if (d.length === 8 && !d.includes('-')) {
-        formatted = `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`;
-      }
-      const time = new Date(formatted).getTime();
-      return isNaN(time) ? 0 : time;
-    };
-
-    // 오늘 이후 또는 오늘인 날짜 중 가장 빠른 날짜 찾기
+    const allDates = [item.SPSPLY_RCEPT_BGNDE, item.GNRL_RNK1_CRSPAREA_RCPTDE, item.GNRL_RNK1_GG_RCPTDE, item.GNRL_RNK1_ETC_AREA_RCPTDE, item.GNRL_RNK2_CRSPAREA_RCPTDE, item.GNRL_RNK2_GG_RCPTDE, item.GNRL_RNK2_ETC_AREA_RCPTDE, item.SUBSCRPT_RCEPT_BGNDE, item.SPECL_RCEPT_BGNDE, item.GNRL_RCEPT_BGNDE, item.RCEPT_BGNDE].filter(d => d && d !== 'null' && d !== '');
     const todayTime = new Date().setHours(0,0,0,0);
-    const upcomingDates = allDates
-      .map(d => parseLocalDate(d))
-      .filter(t => t >= todayTime)
-      .sort((a, b) => a - b);
+    const upcoming = allDates.map(d => parseToTime(d)).filter((t): t is number => t !== null && t >= todayTime).sort((a,b) => a-b);
+    const priorityDateStr = upcoming.length > 0 ? String(upcoming[0]) : (allDates[0] || item.RCEPT_BGNDE);
 
-    // priorityDate 결정 (가장 가까운 미래 일정, 없으면 첫 번째 일정)
-    let priorityDate = allDates[0];
-    if (upcomingDates.length > 0) {
-      const firstUpcoming = new Date(upcomingDates[0]);
-      priorityDate = `${firstUpcoming.getFullYear()}-${String(firstUpcoming.getMonth() + 1).padStart(2, '0')}-${String(firstUpcoming.getDate()).padStart(2, '0')}`;
-    }
+    const endDates = [item.RCEPT_ENDDE, item.SUBSCRPT_RCEPT_ENDDE, item.GNRL_RCEPT_ENDDE, item.SPECL_RCEPT_ENDDE, item.GNRL_RNK2_ETC_AREA_ENDDE, item.GNRL_RNK2_CRSPAREA_ENDDE];
 
-    const getCategoryBadge = (cat?: string) => {
-      switch(cat) {
-        case 'APT': return <span className="badge">아파트</span>;
-        case 'OFFICETEL': return <span className="badge warning">오피스텔/도시형</span>;
-        case 'REMAINDER': return <span className="badge danger">무순위/임의</span>;
-        case 'RENT': return <span className="badge info">민간임대</span>;
-        default: return <span className="badge">{item.HOUSE_SECD_NM}</span>;
-      }
+    const getCatBadge = (cat?: string) => {
+      if (cat === 'APT') return <span className="badge">아파트</span>;
+      if (cat === 'OFFICETEL') return <span className="badge warning">오피스텔/도시형</span>;
+      if (cat === 'REMAINDER') return <span className="badge danger">무순위/임의</span>;
+      if (cat === 'RENT') return <span className="badge info">민간임대</span>;
+      return <span className="badge">{item.HOUSE_SECD_NM}</span>;
     };
 
     return (
       <div key={idx} className="card">
         <div className="card-header">
-          <div className="badge-group">
-            {getCategoryBadge(item._category)}
-            <span className="badge secondary">{item.RENT_SECD_NM}</span>
-            {getDDay(priorityDate)}
-          </div>
+          <div className="badge-group">{getCatBadge(item._category)}<span className="badge secondary">{item.RENT_SECD_NM}</span>{getDDayBadge(priorityDateStr, endDates)}</div>
           <h3>{item.HOUSE_NM}</h3>
           <p className="constructor">시공: {item.CNSTRCT_ENTRPS_NM || '정보없음'}</p>
         </div>
         <div className="card-body">
-          <div className="price-section">
-            <div className="section-title"><Wallet size={16} /> 주택형별 공급가격 및 특공 정보</div>
-            {renderPriceTable(item)}
-          </div>
+          <div className="price-section"><div className="section-title"><Wallet size={16} /> 주택형별 공급가격 및 특공 정보</div>{renderPriceTable(item)}</div>
           <div className="info-item-group">
-            <div className="info-item">
-              <MapPin size={16} />
-              <span style={{flex: 1}}>{item.HSSPLY_ADRES}</span>
-              <a href={`https://map.naver.com/v5/search/${encodeURIComponent(item.HSSPLY_ADRES + ' ' + item.HOUSE_NM)}`} target="_blank" rel="noopener noreferrer" className="map-link"><ExternalLink size={12} /> 지도</a>
-            </div>
-            <div className="info-item">
-              <Building2 size={16} />
-              <span>총 {item.TOT_SUPLY_HSHLDCO}세대 / 입주: {item.MVN_PREARNGE_YM}</span>
-            </div>
+            <div className="info-item"><MapPin size={16} /><span style={{flex: 1}}>{item.HSSPLY_ADRES}</span><a href={`https://map.naver.com/v5/search/${encodeURIComponent(item.HSSPLY_ADRES + ' ' + item.HOUSE_NM)}`} target="_blank" rel="noopener noreferrer" className="map-link"><ExternalLink size={12} /> 지도</a></div>
+            <div className="info-item"><Building2 size={16} /><span>총 {item.TOT_SUPLY_HSHLDCO}세대 / 입주: {item.MVN_PREARNGE_YM}</span></div>
           </div>
           <div className="date-section">
-            {/* 날짜 표시용 포맷팅 함수 */}
-            {(() => {
-              const formatDispDate = (d: string | null) => {
-                if (!d) return '';
-                if (d.length === 8 && !d.includes('-')) {
-                  return `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`;
-                }
-                return d;
-              };
-
-              return (
-                <>
-                  {/* 아파트 특공 */}
-                  {item.SPSPLY_RCEPT_BGNDE && (
-                    <div className="info-item small">
-                      <Calendar size={14} className="text-orange" />
-                      <span className="date-label">특별공급:</span>
-                      <span>{formatDispDate(item.SPSPLY_RCEPT_BGNDE)}</span>
-                    </div>
-                  )}
-                  
-                  {/* 아파트 1순위 */}
-                  {item.GNRL_RNK1_CRSPAREA_RCPTDE && (
-                    <div className="info-item small">
-                      <Calendar size={14} className="text-blue" />
-                      <span className="date-label">1순위(해당):</span>
-                      <span>{formatDispDate(item.GNRL_RNK1_CRSPAREA_RCPTDE)}</span>
-                    </div>
-                  )}
-                  {item.GNRL_RNK1_GG_RCPTDE && (
-                    <div className="info-item small">
-                      <Calendar size={14} className="text-blue" />
-                      <span className="date-label">1순위(경기):</span>
-                      <span>{formatDispDate(item.GNRL_RNK1_GG_RCPTDE)}</span>
-                    </div>
-                  )}
-                  {item.GNRL_RNK1_ETC_AREA_RCPTDE && (
-                    <div className="info-item small">
-                      <Calendar size={14} className="text-blue" />
-                      <span className="date-label">1순위(기타):</span>
-                      <span>{formatDispDate(item.GNRL_RNK1_ETC_AREA_RCPTDE)}</span>
-                    </div>
-                  )}
-
-                  {/* 아파트 2순위 */}
-                  {item.GNRL_RNK2_CRSPAREA_RCPTDE && (
-                    <div className="info-item small">
-                      <Calendar size={14} className="text-gray" />
-                      <span className="date-label">2순위(해당):</span>
-                      <span>{formatDispDate(item.GNRL_RNK2_CRSPAREA_RCPTDE)}</span>
-                    </div>
-                  )}
-                  {item.GNRL_RNK2_GG_RCPTDE && (
-                    <div className="info-item small">
-                      <Calendar size={14} className="text-gray" />
-                      <span className="date-label">2순위(경기):</span>
-                      <span>{formatDispDate(item.GNRL_RNK2_GG_RCPTDE)}</span>
-                    </div>
-                  )}
-                  {item.GNRL_RNK2_ETC_AREA_RCPTDE && (
-                    <div className="info-item small">
-                      <Calendar size={14} className="text-gray" />
-                      <span className="date-label">2순위(기타):</span>
-                      <span>{formatDispDate(item.GNRL_RNK2_ETC_AREA_RCPTDE)}</span>
-                    </div>
-                  )}
-
-                  {/* 민간임대 특공/일반 */}
-                  {item.SPECL_RCEPT_BGNDE && (
-                    <div className="info-item small">
-                      <Calendar size={14} className="text-orange" />
-                      <span className="date-label">특별공급:</span>
-                      <span>{formatDispDate(item.SPECL_RCEPT_BGNDE)}</span>
-                    </div>
-                  )}
-                  {item.GNRL_RCEPT_BGNDE && (
-                    <div className="info-item small">
-                      <Calendar size={14} className="text-blue" />
-                      <span className="date-label">일반공급:</span>
-                      <span>{formatDispDate(item.GNRL_RCEPT_BGNDE)}</span>
-                    </div>
-                  )}
-
-                  {/* 오피스텔/무순위/임의공급 */}
-                  {item.SUBSCRPT_RCEPT_BGNDE && (
-                    <div className="info-item small">
-                      <Calendar size={14} className="text-purple" />
-                      <span className="date-label">청약접수:</span>
-                      <span>{formatDispDate(item.SUBSCRPT_RCEPT_BGNDE)} ~ {formatDispDate(item.SUBSCRPT_RCEPT_ENDDE)}</span>
-                    </div>
-                  )}
-
-                  {/* 공통 접수일 (아파트 상세 일정이 없을 때만 표시) */}
-                  {!item.GNRL_RNK1_CRSPAREA_RCPTDE && !item.SPSPLY_RCEPT_BGNDE && !item.SPECL_RCEPT_BGNDE && !item.SUBSCRPT_RCEPT_BGNDE && item.RCEPT_BGNDE && (
-                    <div className="info-item small">
-                      <Calendar size={14} />
-                      <span className="date-label">접수시작:</span>
-                      <span>{formatDispDate(item.RCEPT_BGNDE)}</span>
-                    </div>
-                  )}
-                </>
-              );
-            })()}
+            {item.SPSPLY_RCEPT_BGNDE && <div className="info-item small"><Calendar size={14} className="text-orange" /><span className="date-label">특별공급:</span><span>{fmtDate(item.SPSPLY_RCEPT_BGNDE)}</span></div>}
+            {item.GNRL_RNK1_CRSPAREA_RCPTDE && <div className="info-item small"><Calendar size={14} className="text-blue" /><span className="date-label">1순위(해당):</span><span>{fmtDate(item.GNRL_RNK1_CRSPAREA_RCPTDE)}</span></div>}
+            {item.GNRL_RNK1_GG_RCPTDE && <div className="info-item small"><Calendar size={14} className="text-blue" /><span className="date-label">1순위(경기):</span><span>{fmtDate(item.GNRL_RNK1_GG_RCPTDE)}</span></div>}
+            {item.GNRL_RNK1_ETC_AREA_RCPTDE && <div className="info-item small"><Calendar size={14} className="text-blue" /><span className="date-label">1순위(기타):</span><span>{fmtDate(item.GNRL_RNK1_ETC_AREA_RCPTDE)}</span></div>}
+            {item.GNRL_RNK2_CRSPAREA_RCPTDE && <div className="info-item small"><Calendar size={14} className="text-gray" /><span className="date-label">2순위(해당):</span><span>{fmtDate(item.GNRL_RNK2_CRSPAREA_RCPTDE)}</span></div>}
+            {item.GNRL_RNK2_GG_RCPTDE && <div className="info-item small"><Calendar size={14} className="text-gray" /><span className="date-label">2순위(경기):</span><span>{fmtDate(item.GNRL_RNK2_GG_RCPTDE)}</span></div>}
+            {item.GNRL_RNK2_ETC_AREA_RCPTDE && <div className="info-item small"><Calendar size={14} className="text-gray" /><span className="date-label">2순위(기타):</span><span>{fmtDate(item.GNRL_RNK2_ETC_AREA_RCPTDE)}</span></div>}
+            {item.SPECL_RCEPT_BGNDE && <div className="info-item small"><Calendar size={14} className="text-orange" /><span className="date-label">특별공급:</span><span>{fmtDate(item.SPECL_RCEPT_BGNDE)}</span></div>}
+            {item.GNRL_RCEPT_BGNDE && <div className="info-item small"><Calendar size={14} className="text-blue" /><span className="date-label">일반공급:</span><span>{fmtDate(item.GNRL_RCEPT_BGNDE)}</span></div>}
+            {item.SUBSCRPT_RCEPT_BGNDE && <div className="info-item small"><Calendar size={14} className="text-purple" /><span className="date-label">청약접수:</span><span>{fmtDate(item.SUBSCRPT_RCEPT_BGNDE)} ~ {fmtDate(item.SUBSCRPT_RCEPT_ENDDE)}</span></div>}
+            {!item.GNRL_RNK1_CRSPAREA_RCPTDE && !item.SPSPLY_RCEPT_BGNDE && !item.SPECL_RCEPT_BGNDE && !item.SUBSCRPT_RCEPT_BGNDE && item.RCEPT_BGNDE && <div className="info-item small"><Calendar size={14} /><span className="date-label">접수시작:</span><span>{fmtDate(item.RCEPT_BGNDE)}</span></div>}
           </div>
         </div>
-        <div className="card-footer">
-          <a href={item.PBLANC_URL} target="_blank" rel="noopener noreferrer" className="details-btn">공고문 상세보기</a>
-        </div>
+        <div className="card-footer"><a href={item.PBLANC_URL} target="_blank" rel="noopener noreferrer" className="details-btn">공고문 상세보기</a></div>
       </div>
     );
   };
@@ -508,10 +283,7 @@ function App() {
   return (
     <div className="container">
       <header className="main-header">
-        <div className="header-content">
-          <h1>🏢 청약 대시보드</h1>
-          <p>실시간 분양가 및 지역별 현황</p>
-        </div>
+        <div className="header-content"><h1>🏢 청약 대시보드</h1><p>실시간 분양가 및 지역별 현황</p></div>
         <div className="view-toggle">
           <button className={`toggle-btn ${viewMode === 'list' ? 'active' : ''}`} onClick={() => setViewMode('list')}>목록</button>
           <button className={`toggle-btn ${viewMode === 'map' ? 'active' : ''}`} onClick={() => setViewMode('map')}>지도</button>
@@ -539,12 +311,8 @@ function App() {
           </div>
         ) : (
           <div className="list-view-container">
-            {selectedRegion && (
-              <button className="back-link" onClick={() => setSelectedRegion(null)}><ChevronLeft size={20} /> 지도로 돌아가기 ({selectedRegion})</button>
-            )}
-            <div className="grid">
-              {(selectedRegion ? filteredItems : items).map((item, idx) => renderCard(item, idx))}
-            </div>
+            {selectedRegion && <button className="back-link" onClick={() => setSelectedRegion(null)}><ChevronLeft size={20} /> 지도로 돌아가기 ({selectedRegion})</button>}
+            <div className="grid">{(selectedRegion ? filteredItems : items).map((item, idx) => renderCard(item, idx))}</div>
           </div>
         )}
       </main>

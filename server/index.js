@@ -46,26 +46,23 @@ app.get('/api/apartments', async (req, res) => {
 
 app.get('/api/test-raw', async (req, res) => {
     try {
-        const testItems = [
-            { name: '아파트', cat: 'APT', hNo: '2026000049', pNo: '2026000049' },
-            { name: '민간임대', cat: 'RENT', hNo: '2026850021', pNo: '2026850021' }
+        const endpoints = [
+            'getAPTLttotPblancDetail',
+            'getUrbtyOfctlLttotPblancDetail',
+            'getRemndrLttotPblancDetail',
+            'getPblPvtRentLttotPblancDetail'
         ];
         
-        let allDetails = {};
-        for (const item of testItems) {
-            let endpoint = 'getAPTLttotPblancMdl';
-            if (item.cat === 'RENT') endpoint = 'getPblPvtRentLttotPblancMdl';
-            
+        let allResults = [];
+        for (const endpoint of endpoints) {
             const response = await axios.get(`${API_BASE_URL}/${endpoint}`, {
-                params: {
-                    'cond[HOUSE_MANAGE_NO::EQ]': item.hNo,
-                    'cond[PBLANC_NO::EQ]': item.pNo,
-                    serviceKey: process.env.SERVICE_KEY
-                }
+                params: { page: 1, perPage: 100, serviceKey: process.env.SERVICE_KEY }
             });
-            allDetails[item.name] = response.data.data || [];
+            const data = response.data.data || [];
+            const matches = data.filter(item => item.HOUSE_NM.includes('어반홈스'));
+            allResults = [...allResults, ...matches];
         }
-        res.json(allDetails);
+        res.json(allResults);
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -73,9 +70,9 @@ app.get('/api/test-raw', async (req, res) => {
 
 // 주택형별 상세정보 (면적, 분양가 등) - 카테고리별 분기 처리
 app.get('/api/apartment-details/:houseNo/:pblancNo', async (req, res) => {
+    const { category = 'APT' } = req.query;
     try {
         const { houseNo, pblancNo } = req.params;
-        const { category = 'APT' } = req.query; // 쿼리 파라미터로 카테고리 수신
         
         let endpoint = 'getAPTLttotPblancMdl'; // 기본값 (아파트)
         
@@ -112,6 +109,10 @@ app.get('/api/reminders', async (req, res) => {
     res.json({ data: [] });
 });
 
-app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server is running on port ${PORT} (External access enabled)`);
-});
+if (require.main === module) {
+    app.listen(PORT, '0.0.0.0', () => {
+        console.log(`Server is running on port ${PORT} (External access enabled)`);
+    });
+}
+
+module.exports = app;
