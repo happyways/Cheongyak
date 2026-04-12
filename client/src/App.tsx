@@ -90,12 +90,34 @@ function App() {
   const [details, setDetails] = useState<Record<string, HouseDetail[]>>({});
   const [dataErrors, setDataErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [sortBy, setSortBy] = useState<SortBy>('upcoming');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedRegion, setSelectedRegion] = useState<string | null>(null);
   const [hoveredRegion, setHoveredRegion] = useState<string | null>(null);
   const [expandedCards, setExpandedCards] = useState<Record<string, boolean>>({});
+
+  // 로컬 스토리지에서 데이터 로드
+  const loadFromCache = () => {
+    try {
+      const cachedItems = localStorage.getItem('cheongyak_items');
+      const cachedDetails = localStorage.getItem('cheongyak_details');
+      const cachedTime = localStorage.getItem('cheongyak_last_updated');
+
+      if (cachedItems && cachedTime) {
+        const parsedItems = JSON.parse(cachedItems);
+        setRawData(parsedItems);
+        setLastUpdated(cachedTime);
+        if (cachedDetails) setDetails(JSON.parse(cachedDetails));
+        setLoading(false);
+        return true;
+      }
+    } catch (e) {
+      console.error('Cache load error:', e);
+    }
+    return false;
+  };
 
   const fetchDetails = async (item: CheongyakItem) => {
     const hNo = item.HOUSE_MANAGE_NO || item.houseManageNo;
@@ -166,7 +188,10 @@ function App() {
     return `${uk > 0 ? uk + '억 ' : ''}${man > 0 ? man.toLocaleString() + '만' : ''}원`;
   };
 
-  const fetchItems = async () => {
+  const fetchItems = async (isManual = false) => {
+    // 수동 새로고침이 아니고 캐시에 데이터가 있으면 스킵
+    if (!isManual && loadFromCache()) return;
+
     setLoading(true);
     try {
       const response = await axios.get(`http://${window.location.hostname}:5001/api/apartments`);
@@ -179,10 +204,33 @@ function App() {
         return Math.max(...(endDates as number[])) >= todayTime;
       });
 
+      const now = new Date().toLocaleString('ko-KR', { 
+        year: 'numeric', month: '2-digit', day: '2-digit', 
+        hour: '2-digit', minute: '2-digit', second: '2-digit' 
+      });
+
       setRawData(filtered);
+      setLastUpdated(now);
+      
+      // 로컬 스토리지 저장
+      localStorage.setItem('cheongyak_items', JSON.stringify(filtered));
+      localStorage.setItem('cheongyak_last_updated', now);
+
+      // 상세 정보도 순차적으로 가져오기
       filtered.forEach(item => fetchDetails(item));
-    } catch (e) { console.error(e); } finally { setLoading(false); }
+    } catch (e) { 
+      console.error(e); 
+    } finally { 
+      setLoading(false); 
+    }
   };
+
+  // 상세 정보 변경 시 캐시 업데이트
+  useEffect(() => {
+    if (Object.keys(details).length > 0) {
+      localStorage.setItem('cheongyak_details', JSON.stringify(details));
+    }
+  }, [details]);
 
   useEffect(() => {
     if (rawData.length === 0) return;
@@ -323,7 +371,25 @@ function App() {
   return (
     <div className="container">
       <header className="main-header">
-        <div className="header-content"><h1>🏢 청약 대시보드</h1><p>실시간 분양가 및 지역별 현황</p></div>
+        <div className="header-content">
+          <h1>🏢 청약 대시보드</h1>
+          <div className="update-info">
+            <p>실시간 분양가 및 지역별 현황</p>
+            {lastUpdated && (
+              <span className="last-updated">
+                마지막 업데이트: {lastUpdated}
+                <button 
+                  className="refresh-btn" 
+                  onClick={() => fetchItems(true)} 
+                  disabled={loading}
+                  title="데이터 새로고침"
+                >
+                  <Loader2 size={14} className={loading ? 'spin' : ''} />
+                </button>
+              </span>
+            )}
+          </div>
+        </div>
         <div className="header-controls">
           <div className="search-bar">
             <Search size={18} className="search-icon" />
