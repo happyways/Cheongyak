@@ -104,14 +104,21 @@ function App() {
       const cachedItems = localStorage.getItem('cheongyak_items');
       const cachedDetails = localStorage.getItem('cheongyak_details');
       const cachedTime = localStorage.getItem('cheongyak_last_updated');
+      const cachedTs = localStorage.getItem('cheongyak_last_updated_ts');
 
-      if (cachedItems && cachedTime) {
-        const parsedItems = JSON.parse(cachedItems);
-        setRawData(parsedItems);
-        setLastUpdated(cachedTime);
-        if (cachedDetails) setDetails(JSON.parse(cachedDetails));
-        setLoading(false);
-        return true;
+      if (cachedItems && cachedTime && cachedTs) {
+        const lastTs = parseInt(cachedTs);
+        const nowTs = Date.now();
+        
+        // 마지막 업데이트 시간(Hour)과 현재 시간(Hour)이 같으면 캐시 유지
+        // 다르면(정각이 지났으면) false를 반환하여 새로고침 유도
+        if (Math.floor(lastTs / 3600000) === Math.floor(nowTs / 3600000)) {
+          setRawData(JSON.parse(cachedItems));
+          setLastUpdated(cachedTime);
+          if (cachedDetails) setDetails(JSON.parse(cachedDetails));
+          setLoading(false);
+          return true;
+        }
       }
     } catch (e) {
       console.error('Cache load error:', e);
@@ -204,19 +211,20 @@ function App() {
         return Math.max(...(endDates as number[])) >= todayTime;
       });
 
-      const now = new Date().toLocaleString('ko-KR', { 
+      const now = new Date();
+      const timeStr = now.toLocaleString('ko-KR', { 
         year: 'numeric', month: '2-digit', day: '2-digit', 
         hour: '2-digit', minute: '2-digit', second: '2-digit' 
       });
 
       setRawData(filtered);
-      setLastUpdated(now);
+      setLastUpdated(timeStr);
       
       // 로컬 스토리지 저장
       localStorage.setItem('cheongyak_items', JSON.stringify(filtered));
-      localStorage.setItem('cheongyak_last_updated', now);
+      localStorage.setItem('cheongyak_last_updated', timeStr);
+      localStorage.setItem('cheongyak_last_updated_ts', now.getTime().toString());
 
-      // 상세 정보도 순차적으로 가져오기
       filtered.forEach(item => fetchDetails(item));
     } catch (e) { 
       console.error(e); 
@@ -253,27 +261,6 @@ function App() {
   }, [rawData, sortBy]);
 
   useEffect(() => { fetchItems(); }, []);
-
-  // 정각 자동 업데이트 로직
-  useEffect(() => {
-    const scheduleNextUpdate = () => {
-      const now = new Date();
-      const nextHour = new Date(now);
-      nextHour.setHours(now.getHours() + 1, 0, 0, 0);
-      const msUntilNextHour = nextHour.getTime() - now.getTime();
-
-      const timer = setTimeout(() => {
-        console.log('정각 자동 업데이트 시작...');
-        fetchItems(true);
-        scheduleNextUpdate(); // 다음 정각 일정 예약
-      }, msUntilNextHour);
-
-      return timer;
-    };
-
-    const timerId = scheduleNextUpdate();
-    return () => clearTimeout(timerId);
-  }, []);
 
   const regionCounts = useMemo(() => {
     const counts: Record<string, number> = {};
