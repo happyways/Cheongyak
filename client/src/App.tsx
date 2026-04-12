@@ -196,41 +196,55 @@ function App() {
   };
 
   const fetchItems = async (isManual = false) => {
-    // 수동 새로고침이 아니고 캐시에 데이터가 있으면 스킵
+    // 수동 새로고침이 아니고 캐시가 유효하면(같은 시간대) 스킵
     if (!isManual && loadFromCache()) return;
 
     setLoading(true);
     try {
       const response = await axios.get(`http://${window.location.hostname}:5001/api/apartments`);
       const data = (response.data.data || []) as CheongyakItem[];
-      const todayTime = new Date().setHours(0, 0, 0, 0);
-
-      const filtered = data.filter(item => {
-        const endDates = [item.RCEPT_ENDDE, item.SUBSCRPT_RCEPT_ENDDE, item.GNRL_RCEPT_ENDDE, item.SPECL_RCEPT_ENDDE, item.GNRL_RNK2_ETC_AREA_ENDDE, item.GNRL_RNK2_CRSPAREA_ENDDE].map(d => parseToTime(d)).filter(t => t !== null);
-        if (endDates.length === 0) return true;
-        return Math.max(...(endDates as number[])) >= todayTime;
-      });
-
-      const now = new Date();
-      const timeStr = now.toLocaleString('ko-KR', { 
-        year: 'numeric', month: '2-digit', day: '2-digit', 
-        hour: '2-digit', minute: '2-digit', second: '2-digit' 
-      });
-
-      setRawData(filtered);
-      setLastUpdated(timeStr);
-      
-      // 로컬 스토리지 저장
-      localStorage.setItem('cheongyak_items', JSON.stringify(filtered));
-      localStorage.setItem('cheongyak_last_updated', timeStr);
-      localStorage.setItem('cheongyak_last_updated_ts', now.getTime().toString());
-
-      filtered.forEach(item => fetchDetails(item));
+      processData(data);
     } catch (e) { 
-      console.error(e); 
+      console.warn('Backend API unavailable, trying static fallback...');
+      try {
+        const staticRes = await axios.get('/static_data.json');
+        if (staticRes.data) {
+          setRawData(staticRes.data.items || []);
+          setDetails(staticRes.data.details || {});
+          setLastUpdated(staticRes.data.lastUpdated + ' (정적 데이터)');
+        }
+      } catch (staticErr) {
+        console.error('Static fallback also failed:', staticErr);
+      }
     } finally { 
       setLoading(false); 
     }
+  };
+
+  const processData = (data: CheongyakItem[]) => {
+    const todayTime = new Date().setHours(0, 0, 0, 0);
+
+    const filtered = data.filter(item => {
+      const endDates = [item.RCEPT_ENDDE, item.SUBSCRPT_RCEPT_ENDDE, item.GNRL_RCEPT_ENDDE, item.SPECL_RCEPT_ENDDE, item.GNRL_RNK2_ETC_AREA_ENDDE, item.GNRL_RNK2_CRSPAREA_ENDDE].map(d => parseToTime(d)).filter(t => t !== null);
+      if (endDates.length === 0) return true;
+      return Math.max(...(endDates as number[])) >= todayTime;
+    });
+
+    const now = new Date();
+    const timeStr = now.toLocaleString('ko-KR', { 
+      year: 'numeric', month: '2-digit', day: '2-digit', 
+      hour: '2-digit', minute: '2-digit', second: '2-digit' 
+    });
+
+    setRawData(filtered);
+    setLastUpdated(timeStr);
+    
+    // 로컬 스토리지 저장
+    localStorage.setItem('cheongyak_items', JSON.stringify(filtered));
+    localStorage.setItem('cheongyak_last_updated', timeStr);
+    localStorage.setItem('cheongyak_last_updated_ts', now.getTime().toString());
+
+    filtered.forEach(item => fetchDetails(item));
   };
 
   // 상세 정보 변경 시 캐시 업데이트
