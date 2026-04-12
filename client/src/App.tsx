@@ -254,6 +254,27 @@ function App() {
 
   useEffect(() => { fetchItems(); }, []);
 
+  // 정각 자동 업데이트 로직
+  useEffect(() => {
+    const scheduleNextUpdate = () => {
+      const now = new Date();
+      const nextHour = new Date(now);
+      nextHour.setHours(now.getHours() + 1, 0, 0, 0);
+      const msUntilNextHour = nextHour.getTime() - now.getTime();
+
+      const timer = setTimeout(() => {
+        console.log('정각 자동 업데이트 시작...');
+        fetchItems(true);
+        scheduleNextUpdate(); // 다음 정각 일정 예약
+      }, msUntilNextHour);
+
+      return timer;
+    };
+
+    const timerId = scheduleNextUpdate();
+    return () => clearTimeout(timerId);
+  }, []);
+
   const regionCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     items.forEach(item => { counts[item.SUBSCRPT_AREA_CODE_NM] = (counts[item.SUBSCRPT_AREA_CODE_NM] || 0) + 1; });
